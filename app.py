@@ -1,22 +1,16 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import pickle
 
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-
-# Models
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.svm import SVC
+from sklearn.ensemble import RandomForestClassifier
 
 st.set_page_config(layout="wide")
-st.title("📊 Customer Behavior Classification (2 Dataset Merge)")
+st.title("Customer Behavior Prediction (2 Dataset Merge)")
 
-# ------------------ STEP 1: UPLOAD DATA ------------------
-st.header("Step 1: Upload Datasets")
+# ------------------ STEP 1: UPLOAD ------------------
+st.header(" Upload Datasets")
 
 file1 = st.file_uploader("Upload Dataset 1", type=["csv"])
 file2 = st.file_uploader("Upload Dataset 2", type=["csv"])
@@ -25,130 +19,104 @@ if file1 and file2:
     df1 = pd.read_csv(file1)
     df2 = pd.read_csv(file2)
 
-    st.success("Datasets Loaded ✅")
+    st.success("Datasets Loaded ")
+
     st.write("Dataset 1", df1.head())
     st.write("Dataset 2", df2.head())
 
     # ------------------ STEP 2: MERGE ------------------
-    st.header("Step 2: Merge Datasets")
+    st.header(" Merge Datasets")
 
     common_cols = list(set(df1.columns) & set(df2.columns))
 
     if len(common_cols) == 0:
-        st.error("❌ No common column to merge")
+        st.error(" No common column found")
         st.stop()
 
     merge_col = st.selectbox("Select Common Column", common_cols)
 
     df = pd.merge(df1, df2, on=merge_col)
 
-    st.success("Merged Dataset ✅")
+    st.success("Merged Successfully ")
     st.write(df.head())
 
     # ------------------ STEP 3: SELECT TARGET ------------------
-    st.header("Step 3: Select Target Column")
+    st.header("Select Target Column")
 
-    target_col = st.selectbox("Select Target (Classification Column)", df.columns)
+    target_col = st.selectbox("Select Behavior Column", df.columns)
 
-    # ------------------ STEP 4: PREPROCESS ------------------
-    if st.button("🚀 Train Model"):
+    # ------------------ STEP 4: TRAIN MODEL ------------------
+    if st.button("Train Model"):
 
         X = df.drop(columns=[target_col])
         y = df[target_col]
 
-        # Convert categorical → numbers
+        customer_ids = df[merge_col]
+
+        # Convert categorical
         X = pd.get_dummies(X, drop_first=True)
+        y_encoded, labels = pd.factorize(y)
 
         # Split
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42
+        X_train, X_test, y_train, y_test, id_train, id_test = train_test_split(
+            X, y_encoded, customer_ids, test_size=0.2, random_state=42
         )
 
         # Scale
         scaler = StandardScaler()
         X_train = scaler.fit_transform(X_train)
-        X_test_scaled = scaler.transform(X_test)
+        X_test = scaler.transform(X_test)
 
-        # ------------------ STEP 5: MODELS ------------------
-        models = [
-            ("Logistic Regression", LogisticRegression(max_iter=1000)),
-            ("Random Forest", RandomForestClassifier(n_estimators=100)),
-            ("Gradient Boosting", GradientBoostingClassifier()),
-            ("SVM", SVC())
-        ]
+        # Model
+        model = RandomForestClassifier()
+        model.fit(X_train, y_train)
 
-        results = []
-        best_model = None
-        best_score = 0
-        best_name = ""
+        # Predict
+        y_pred = model.predict(X_test)
 
-        for name, model in models:
-            model.fit(X_train, y_train)
-            y_pred = model.predict(X_test_scaled)
+        st.success("Model Trained ")
 
-            acc = accuracy_score(y_test, y_pred)
-            prec = precision_score(y_test, y_pred, average="weighted")
-            rec = recall_score(y_test, y_pred, average="weighted")
-            f1 = f1_score(y_test, y_pred, average="weighted")
+        # ------------------ STEP 5: OUTPUT ------------------
+        st.subheader(" Customer Behavior Output")
 
-            results.append([name, acc, prec, rec, f1])
+        for i in range(len(y_pred)):
 
-            if acc > best_score:
-                best_score = acc
-                best_model = model
-                best_name = name
+            customer_id = id_test.iloc[i]
+            behavior = labels[y_pred[i]]
 
-        # ------------------ STEP 6: SHOW RESULTS ------------------
-        results_df = pd.DataFrame(results, columns=[
-            "Model", "Accuracy", "Precision", "Recall", "F1 Score"
-        ])
+            # 🔥 REASON LOGIC
+            purchase = df.iloc[id_test.index[i]]["Purchase Amount"]
 
-        st.subheader("📊 Model Comparison")
-        st.dataframe(results_df)
+            if purchase > df["Purchase Amount"].mean():
+                reason = "Very consistent spending"
+            else:
+                reason = "Irregular spending behavior"
 
-        st.success(f"🏆 Best Model: {best_name}")
+            st.text(f"""
+Customer {customer_id}:
+Behavior: {behavior}
+Reason: {reason}
+----------------------------------------
+""")
 
-        # ------------------ STEP 7: SAVE MODEL ------------------
-        model_data = {
-            "model": best_model,
-            "scaler": scaler,
-            "columns": X.columns.tolist(),
-            "target": target_col
-        }
+    # ------------------ STEP 6: PREDICT FULL DATA ------------------
+    if st.button(" Predict Full Dataset"):
 
-        with open("classification_model.pkl", "wb") as f:
-            pickle.dump(model_data, f)
+        X = df.drop(columns=[target_col])
+        y = df[target_col]
 
-        with open("classification_model.pkl", "rb") as f:
-            st.download_button("📥 Download Model", f, "classification_model.pkl")
+        X = pd.get_dummies(X, drop_first=True)
+        y_encoded, labels = pd.factorize(y)
 
-    # ------------------ STEP 8: PREDICTION ------------------
-    if st.button("🔮 Predict Using Saved Model"):
-        try:
-            with open("classification_model.pkl", "rb") as f:
-                data = pickle.load(f)
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
 
-            model = data["model"]
-            scaler = data["scaler"]
-            saved_cols = data["columns"]
-            target_col = data["target"]
+        model = RandomForestClassifier()
+        model.fit(X_scaled, y_encoded)
 
-            X = df.drop(columns=[target_col])
-            X = pd.get_dummies(X, drop_first=True)
+        preds = model.predict(X_scaled)
 
-            for col in saved_cols:
-                if col not in X:
-                    X[col] = 0
+        df["Predicted Behavior"] = [labels[p] for p in preds]
 
-            X = X[saved_cols]
-            X_scaled = scaler.transform(X)
-
-            preds = model.predict(X_scaled)
-
-            df["Prediction"] = preds
-
-            st.subheader("🔮 Predictions")
-            st.write(df.head(20))
-
-        except Exception as e:
-            st.error(e)
+        st.subheader(" Full Prediction")
+        st.dataframe(df.head(20))
