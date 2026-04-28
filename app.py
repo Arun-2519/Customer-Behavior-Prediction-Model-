@@ -8,44 +8,59 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.svm import SVC
 
 st.set_page_config(layout="wide")
-st.title("📊 Customer Behavior Prediction")
+st.title("📊 Customer Behavior Prediction System")
 
-# ------------------ UPLOAD ------------------
-file1 = st.file_uploader("Upload Dataset 1", type=["csv"])
-file2 = st.file_uploader("Upload Dataset 2", type=["csv"])
+# ------------------ LOAD DATA ------------------
+st.header("📁 Upload Data")
 
-if file1 and file2:
+customers_file = st.file_uploader("Upload Customers Dataset", type=["csv"])
+orders_file = st.file_uploader("Upload Orders Dataset", type=["csv"])
 
-    df1 = pd.read_csv(file1)
-    df2 = pd.read_csv(file2)
+if customers_file and orders_file:
+
+    customers = pd.read_csv(customers_file)
+    orders = pd.read_csv(orders_file)
 
     st.success("Datasets Loaded ✅")
 
-    # ------------------ MERGE ------------------
-    common_cols = list(set(df1.columns) & set(df2.columns))
+    st.write("Customers Data", customers.head())
+    st.write("Orders Data", orders.head())
 
-    if not common_cols:
-        st.error("❌ No common column found")
+    # ------------------ MERGE ------------------
+    st.header("🔗 Merge Data")
+
+    if "Customer ID" not in customers.columns or "Customer ID" not in orders.columns:
+        st.error("❌ 'Customer ID' column required in both datasets")
         st.stop()
 
-    merge_col = st.selectbox("Select Common Column", common_cols)
+    df = pd.merge(customers, orders, on="Customer ID")
 
-    df = pd.merge(df1, df2, on=merge_col)
+    st.write("Merged Dataset", df.head())
 
-    st.write("Merged Data", df.head())
+    # ------------------ FEATURE CREATION ------------------
+    st.header("⚙️ Feature Engineering")
+
+    # Example features (based on your project)
+    if "Purchase Amount" in df.columns:
+        df["Spending_Level"] = pd.cut(
+            df["Purchase Amount"],
+            bins=[0, 500, 2000, 10000],
+            labels=["Low", "Medium", "High"]
+        )
+
+    st.write(df.head())
 
     # ------------------ TARGET ------------------
     target_col = st.selectbox("Select Target Column (Behavior)", df.columns)
 
     # ------------------ MODEL SELECTION ------------------
-    st.subheader("Select Models")
+    st.header("🤖 Select Models")
 
     selected_models = st.multiselect(
         "Choose Models",
-        ["Logistic Regression", "Random Forest", "Gradient Boosting", "SVM"],
+        ["Logistic Regression", "Random Forest", "Gradient Boosting"],
         default=["Random Forest"]
     )
 
@@ -53,12 +68,17 @@ if file1 and file2:
     if st.button("🚀 Train Models"):
 
         try:
+            df = df.dropna()
+
             X = df.drop(columns=[target_col])
             y = df[target_col]
-            customer_ids = df[merge_col]
+
+            customer_ids = df["Customer ID"]
 
             # Convert categorical
-            X = pd.get_dummies(X, drop_first=True)
+            X = pd.get_dummies(X)
+
+            # Encode target
             y_encoded, labels = pd.factorize(y)
 
             # Split
@@ -71,12 +91,11 @@ if file1 and file2:
             X_train = scaler.fit_transform(X_train)
             X_test_scaled = scaler.transform(X_test)
 
-            # Model dictionary
+            # Models
             model_dict = {
                 "Logistic Regression": LogisticRegression(max_iter=1000),
                 "Random Forest": RandomForestClassifier(),
-                "Gradient Boosting": GradientBoostingClassifier(),
-                "SVM": SVC()
+                "Gradient Boosting": GradientBoostingClassifier()
             }
 
             results = []
@@ -85,10 +104,9 @@ if file1 and file2:
             best_pred = None
             best_name = ""
 
-            # ------------------ TRAIN LOOP ------------------
             for name in selected_models:
-                model = model_dict[name]
 
+                model = model_dict[name]
                 model.fit(X_train, y_train)
 
                 y_pred = model.predict(X_test_scaled)
@@ -96,9 +114,9 @@ if file1 and file2:
                 train_acc = model.score(X_train, y_train)
                 test_acc = accuracy_score(y_test, y_pred)
 
-                prec = precision_score(y_test, y_pred, average="weighted")
-                rec = recall_score(y_test, y_pred, average="weighted")
-                f1 = f1_score(y_test, y_pred, average="weighted")
+                prec = precision_score(y_test, y_pred, average="weighted", zero_division=0)
+                rec = recall_score(y_test, y_pred, average="weighted", zero_division=0)
+                f1 = f1_score(y_test, y_pred, average="weighted", zero_division=0)
 
                 results.append([name, train_acc, test_acc, prec, rec, f1])
 
@@ -108,7 +126,7 @@ if file1 and file2:
                     best_pred = y_pred
                     best_name = name
 
-            # ------------------ RESULTS ------------------
+            # ------------------ SHOW RESULTS ------------------
             results_df = pd.DataFrame(results, columns=[
                 "Model", "Train Accuracy", "Test Accuracy", "Precision", "Recall", "F1 Score"
             ])
@@ -126,7 +144,7 @@ if file1 and file2:
                 customer_id = id_test.iloc[i]
                 behavior = labels[best_pred[i]]
 
-                # Safe reason logic
+                # Smart reasoning
                 if "Purchase Amount" in df.columns:
                     purchase = df.iloc[id_test.index[i]]["Purchase Amount"]
 
@@ -135,7 +153,7 @@ if file1 and file2:
                     else:
                         reason = "Irregular spending behavior"
                 else:
-                    reason = "Behavior based on model prediction"
+                    reason = "Based on model prediction"
 
                 st.text(f"""
 Customer {customer_id}:
@@ -145,4 +163,4 @@ Reason: {reason}
 """)
 
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"❌ Error: {e}")
