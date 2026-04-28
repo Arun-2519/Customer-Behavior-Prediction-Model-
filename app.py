@@ -9,7 +9,7 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 from sklearn.ensemble import RandomForestClassifier
 
 st.set_page_config(layout="wide")
-st.title("📊 Customer Behavior Prediction (Clean & Stable)")
+st.title("📊 Customer Behavior Prediction (Fixed Merge Logic)")
 
 # ------------------ UPLOAD ------------------
 customers_file = st.file_uploader("Upload Customers Dataset", type=["csv"])
@@ -22,53 +22,39 @@ if customers_file and orders_file:
 
     st.success("Datasets Loaded ✅")
 
-    # ------------------ CLEAN CUSTOMER ID ------------------
-    st.header("🧹 Data Cleaning")
+    st.write("Customers Data", customers.head())
+    st.write("Orders Data", orders.head())
 
-    # Drop rows where Customer ID is missing
-    customers = customers.dropna(subset=["Customer ID"])
-    orders = orders.dropna(subset=["Customer ID"])
+    # ------------------ FIX: ADD CUSTOMER ID ------------------
+    st.header("🔧 Fix Missing Customer ID in Orders")
 
-    # Convert to string (important)
-    customers["Customer ID"] = customers["Customer ID"].astype(str)
-    orders["Customer ID"] = orders["Customer ID"].astype(str)
+    if "Customer ID" not in orders.columns:
 
-    st.write("Customers Cleaned", customers.head())
-    st.write("Orders Cleaned", orders.head())
+        if len(customers) != len(orders):
+            st.warning("⚠️ Row mismatch — trimming to smallest size")
 
-    # ------------------ AGGREGATE ORDERS ------------------
-    st.header("📊 Orders Aggregation")
+            min_len = min(len(customers), len(orders))
+            customers = customers.head(min_len)
+            orders = orders.head(min_len)
 
-    # Example aggregation
-    orders_agg = orders.groupby("Customer ID").agg({
-        "Purchase Amount": "sum"
-    }).reset_index()
+        # Assign IDs
+        orders["Customer ID"] = customers["Customer ID"].values
 
-    st.write("Aggregated Orders", orders_agg.head())
+        st.success("Customer ID added to Orders ✅")
 
     # ------------------ MERGE ------------------
-    st.header("🔗 Merge Data")
+    df = pd.merge(customers, orders, on="Customer ID")
 
-    df = pd.merge(customers, orders_agg, on="Customer ID", how="inner")
-
-    if len(df) == 0:
-        st.error("❌ Merge failed — no matching Customer IDs")
-        st.stop()
-
-    st.success("Merged Successfully ✅")
+    st.header("🔗 Merged Dataset")
     st.write(df.head())
 
     # ------------------ FEATURE ENGINEERING ------------------
-    st.header("⚙️ Feature Engineering")
-
-    # Create spending category
-    df["Spending Level"] = pd.cut(
-        df["Purchase Amount"],
-        bins=[0, 500, 2000, 10000],
-        labels=["Low", "Medium", "High"]
-    )
-
-    st.write(df.head())
+    if "Purchase Amount" in df.columns:
+        df["Spending Level"] = pd.cut(
+            df["Purchase Amount"],
+            bins=[0, 500, 2000, 10000],
+            labels=["Low", "Medium", "High"]
+        )
 
     # ------------------ TARGET ------------------
     target_col = st.selectbox("Select Target Column", df.columns)
@@ -99,25 +85,20 @@ if customers_file and orders_file:
             X_train = scaler.fit_transform(X_train)
             X_test = scaler.transform(X_test)
 
-            # ------------------ MODEL ------------------
+            # Model
             model = RandomForestClassifier()
             model.fit(X_train, y_train)
 
             y_pred = model.predict(X_test)
 
             # ------------------ METRICS ------------------
-            train_acc = model.score(X_train, y_train)
-            test_acc = accuracy_score(y_test, y_pred)
-            prec = precision_score(y_test, y_pred, average="weighted", zero_division=0)
-            rec = recall_score(y_test, y_pred, average="weighted", zero_division=0)
-            f1 = f1_score(y_test, y_pred, average="weighted", zero_division=0)
-
             st.subheader("📊 Model Performance")
-            st.write(f"Train Accuracy: {train_acc:.3f}")
-            st.write(f"Test Accuracy: {test_acc:.3f}")
-            st.write(f"Precision: {prec:.3f}")
-            st.write(f"Recall: {rec:.3f}")
-            st.write(f"F1 Score: {f1:.3f}")
+
+            st.write("Train Accuracy:", model.score(X_train, y_train))
+            st.write("Test Accuracy:", accuracy_score(y_test, y_pred))
+            st.write("Precision:", precision_score(y_test, y_pred, average="weighted", zero_division=0))
+            st.write("Recall:", recall_score(y_test, y_pred, average="weighted", zero_division=0))
+            st.write("F1 Score:", f1_score(y_test, y_pred, average="weighted", zero_division=0))
 
             # ------------------ OUTPUT ------------------
             st.subheader("📦 Customer Behavior Output")
@@ -127,12 +108,16 @@ if customers_file and orders_file:
                 customer_id = id_test.iloc[i]
                 behavior = labels[y_pred[i]]
 
-                purchase = df.iloc[id_test.index[i]]["Purchase Amount"]
+                # Reason logic
+                if "Purchase Amount" in df.columns:
+                    purchase = df.iloc[id_test.index[i]]["Purchase Amount"]
 
-                if purchase > df["Purchase Amount"].mean():
-                    reason = "Very consistent spending"
+                    if purchase > df["Purchase Amount"].mean():
+                        reason = "Very consistent spending"
+                    else:
+                        reason = "Irregular spending behavior"
                 else:
-                    reason = "Irregular spending behavior"
+                    reason = "Based on model prediction"
 
                 st.text(f"""
 Customer {customer_id}:
