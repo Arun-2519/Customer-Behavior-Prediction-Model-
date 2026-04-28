@@ -6,15 +6,12 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.ensemble import RandomForestClassifier
 
 st.set_page_config(layout="wide")
-st.title("📊 Customer Behavior Prediction System")
+st.title("📊 Customer Behavior Prediction (Clean & Stable)")
 
-# ------------------ LOAD DATA ------------------
-st.header("📁 Upload Data")
-
+# ------------------ UPLOAD ------------------
 customers_file = st.file_uploader("Upload Customers Dataset", type=["csv"])
 orders_file = st.file_uploader("Upload Orders Dataset", type=["csv"])
 
@@ -25,54 +22,65 @@ if customers_file and orders_file:
 
     st.success("Datasets Loaded ✅")
 
-    st.write("Customers Data", customers.head())
-    st.write("Orders Data", orders.head())
+    # ------------------ CLEAN CUSTOMER ID ------------------
+    st.header("🧹 Data Cleaning")
+
+    # Drop rows where Customer ID is missing
+    customers = customers.dropna(subset=["Customer ID"])
+    orders = orders.dropna(subset=["Customer ID"])
+
+    # Convert to string (important)
+    customers["Customer ID"] = customers["Customer ID"].astype(str)
+    orders["Customer ID"] = orders["Customer ID"].astype(str)
+
+    st.write("Customers Cleaned", customers.head())
+    st.write("Orders Cleaned", orders.head())
+
+    # ------------------ AGGREGATE ORDERS ------------------
+    st.header("📊 Orders Aggregation")
+
+    # Example aggregation
+    orders_agg = orders.groupby("Customer ID").agg({
+        "Purchase Amount": "sum"
+    }).reset_index()
+
+    st.write("Aggregated Orders", orders_agg.head())
 
     # ------------------ MERGE ------------------
     st.header("🔗 Merge Data")
 
-    if "Customer ID" not in customers.columns or "Customer ID" not in orders.columns:
-        st.error("❌ 'Customer ID' column required in both datasets")
+    df = pd.merge(customers, orders_agg, on="Customer ID", how="inner")
+
+    if len(df) == 0:
+        st.error("❌ Merge failed — no matching Customer IDs")
         st.stop()
 
-    df = pd.merge(customers, orders, on="Customer ID")
+    st.success("Merged Successfully ✅")
+    st.write(df.head())
 
-    st.write("Merged Dataset", df.head())
-
-    # ------------------ FEATURE CREATION ------------------
+    # ------------------ FEATURE ENGINEERING ------------------
     st.header("⚙️ Feature Engineering")
 
-    # Example features (based on your project)
-    if "Purchase Amount" in df.columns:
-        df["Spending_Level"] = pd.cut(
-            df["Purchase Amount"],
-            bins=[0, 500, 2000, 10000],
-            labels=["Low", "Medium", "High"]
-        )
+    # Create spending category
+    df["Spending Level"] = pd.cut(
+        df["Purchase Amount"],
+        bins=[0, 500, 2000, 10000],
+        labels=["Low", "Medium", "High"]
+    )
 
     st.write(df.head())
 
     # ------------------ TARGET ------------------
-    target_col = st.selectbox("Select Target Column (Behavior)", df.columns)
-
-    # ------------------ MODEL SELECTION ------------------
-    st.header("🤖 Select Models")
-
-    selected_models = st.multiselect(
-        "Choose Models",
-        ["Logistic Regression", "Random Forest", "Gradient Boosting"],
-        default=["Random Forest"]
-    )
+    target_col = st.selectbox("Select Target Column", df.columns)
 
     # ------------------ TRAIN ------------------
-    if st.button("🚀 Train Models"):
+    if st.button("🚀 Train Model"):
 
         try:
             df = df.dropna()
 
             X = df.drop(columns=[target_col])
             y = df[target_col]
-
             customer_ids = df["Customer ID"]
 
             # Convert categorical
@@ -89,71 +97,42 @@ if customers_file and orders_file:
             # Scale
             scaler = StandardScaler()
             X_train = scaler.fit_transform(X_train)
-            X_test_scaled = scaler.transform(X_test)
+            X_test = scaler.transform(X_test)
 
-            # Models
-            model_dict = {
-                "Logistic Regression": LogisticRegression(max_iter=1000),
-                "Random Forest": RandomForestClassifier(),
-                "Gradient Boosting": GradientBoostingClassifier()
-            }
+            # ------------------ MODEL ------------------
+            model = RandomForestClassifier()
+            model.fit(X_train, y_train)
 
-            results = []
-            best_model = None
-            best_score = 0
-            best_pred = None
-            best_name = ""
+            y_pred = model.predict(X_test)
 
-            for name in selected_models:
+            # ------------------ METRICS ------------------
+            train_acc = model.score(X_train, y_train)
+            test_acc = accuracy_score(y_test, y_pred)
+            prec = precision_score(y_test, y_pred, average="weighted", zero_division=0)
+            rec = recall_score(y_test, y_pred, average="weighted", zero_division=0)
+            f1 = f1_score(y_test, y_pred, average="weighted", zero_division=0)
 
-                model = model_dict[name]
-                model.fit(X_train, y_train)
-
-                y_pred = model.predict(X_test_scaled)
-
-                train_acc = model.score(X_train, y_train)
-                test_acc = accuracy_score(y_test, y_pred)
-
-                prec = precision_score(y_test, y_pred, average="weighted", zero_division=0)
-                rec = recall_score(y_test, y_pred, average="weighted", zero_division=0)
-                f1 = f1_score(y_test, y_pred, average="weighted", zero_division=0)
-
-                results.append([name, train_acc, test_acc, prec, rec, f1])
-
-                if test_acc > best_score:
-                    best_score = test_acc
-                    best_model = model
-                    best_pred = y_pred
-                    best_name = name
-
-            # ------------------ SHOW RESULTS ------------------
-            results_df = pd.DataFrame(results, columns=[
-                "Model", "Train Accuracy", "Test Accuracy", "Precision", "Recall", "F1 Score"
-            ])
-
-            st.subheader("📊 Model Evaluation")
-            st.dataframe(results_df)
-
-            st.success(f"🏆 Best Model: {best_name}")
+            st.subheader("📊 Model Performance")
+            st.write(f"Train Accuracy: {train_acc:.3f}")
+            st.write(f"Test Accuracy: {test_acc:.3f}")
+            st.write(f"Precision: {prec:.3f}")
+            st.write(f"Recall: {rec:.3f}")
+            st.write(f"F1 Score: {f1:.3f}")
 
             # ------------------ OUTPUT ------------------
             st.subheader("📦 Customer Behavior Output")
 
-            for i in range(len(best_pred)):
+            for i in range(len(y_pred)):
 
                 customer_id = id_test.iloc[i]
-                behavior = labels[best_pred[i]]
+                behavior = labels[y_pred[i]]
 
-                # Smart reasoning
-                if "Purchase Amount" in df.columns:
-                    purchase = df.iloc[id_test.index[i]]["Purchase Amount"]
+                purchase = df.iloc[id_test.index[i]]["Purchase Amount"]
 
-                    if purchase > df["Purchase Amount"].mean():
-                        reason = "Very consistent spending"
-                    else:
-                        reason = "Irregular spending behavior"
+                if purchase > df["Purchase Amount"].mean():
+                    reason = "Very consistent spending"
                 else:
-                    reason = "Based on model prediction"
+                    reason = "Irregular spending behavior"
 
                 st.text(f"""
 Customer {customer_id}:
