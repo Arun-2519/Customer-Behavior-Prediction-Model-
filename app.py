@@ -11,113 +11,138 @@ from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.svm import SVC
 
 st.set_page_config(layout="wide")
-st.title("📊 Customer Behavior Prediction (Advanced Training)")
+st.title("📊 Customer Behavior Prediction")
 
-# ------------------ STEP 1: UPLOAD ------------------
+# ------------------ UPLOAD ------------------
 file1 = st.file_uploader("Upload Dataset 1", type=["csv"])
 file2 = st.file_uploader("Upload Dataset 2", type=["csv"])
 
 if file1 and file2:
+
     df1 = pd.read_csv(file1)
     df2 = pd.read_csv(file2)
 
     st.success("Datasets Loaded ✅")
 
-    # ------------------ STEP 2: MERGE ------------------
+    # ------------------ MERGE ------------------
     common_cols = list(set(df1.columns) & set(df2.columns))
 
-    if len(common_cols) == 0:
-        st.error("❌ No common column")
+    if not common_cols:
+        st.error("❌ No common column found")
         st.stop()
 
     merge_col = st.selectbox("Select Common Column", common_cols)
 
     df = pd.merge(df1, df2, on=merge_col)
-    st.write(df.head())
 
-    # ------------------ STEP 3: TARGET ------------------
-    target_col = st.selectbox("Select Behavior Column", df.columns)
+    st.write("Merged Data", df.head())
 
-    # ------------------ STEP 4: TRAIN ------------------
+    # ------------------ TARGET ------------------
+    target_col = st.selectbox("Select Target Column (Behavior)", df.columns)
+
+    # ------------------ MODEL SELECTION ------------------
+    st.subheader("Select Models")
+
+    selected_models = st.multiselect(
+        "Choose Models",
+        ["Logistic Regression", "Random Forest", "Gradient Boosting", "SVM"],
+        default=["Random Forest"]
+    )
+
+    # ------------------ TRAIN ------------------
     if st.button("🚀 Train Models"):
 
-        X = df.drop(columns=[target_col])
-        y = df[target_col]
-        customer_ids = df[merge_col]
+        try:
+            X = df.drop(columns=[target_col])
+            y = df[target_col]
+            customer_ids = df[merge_col]
 
-        # Convert categorical
-        X = pd.get_dummies(X, drop_first=True)
-        y_encoded, labels = pd.factorize(y)
+            # Convert categorical
+            X = pd.get_dummies(X, drop_first=True)
+            y_encoded, labels = pd.factorize(y)
 
-        # Split
-        X_train, X_test, y_train, y_test, id_train, id_test = train_test_split(
-            X, y_encoded, customer_ids, test_size=0.2, random_state=42
-        )
+            # Split
+            X_train, X_test, y_train, y_test, id_train, id_test = train_test_split(
+                X, y_encoded, customer_ids, test_size=0.2, random_state=42
+            )
 
-        # Scale
-        scaler = StandardScaler()
-        X_train = scaler.fit_transform(X_train)
-        X_test_scaled = scaler.transform(X_test)
+            # Scale
+            scaler = StandardScaler()
+            X_train = scaler.fit_transform(X_train)
+            X_test_scaled = scaler.transform(X_test)
 
-        # ------------------ MODELS ------------------
-        models = [
-            ("Logistic Regression", LogisticRegression(max_iter=1000)),
-            ("Random Forest", RandomForestClassifier()),
-            ("Gradient Boosting", GradientBoostingClassifier()),
-            ("SVM", SVC())
-        ]
+            # Model dictionary
+            model_dict = {
+                "Logistic Regression": LogisticRegression(max_iter=1000),
+                "Random Forest": RandomForestClassifier(),
+                "Gradient Boosting": GradientBoostingClassifier(),
+                "SVM": SVC()
+            }
 
-        results = []
-        best_model = None
-        best_score = 0
-        best_name = ""
+            results = []
+            best_model = None
+            best_score = 0
+            best_pred = None
+            best_name = ""
 
-        for name, model in models:
-            model.fit(X_train, y_train)
-            y_pred = model.predict(X_test_scaled)
+            # ------------------ TRAIN LOOP ------------------
+            for name in selected_models:
+                model = model_dict[name]
 
-            acc = accuracy_score(y_test, y_pred)
-            prec = precision_score(y_test, y_pred, average="weighted")
-            rec = recall_score(y_test, y_pred, average="weighted")
-            f1 = f1_score(y_test, y_pred, average="weighted")
+                model.fit(X_train, y_train)
 
-            results.append([name, acc, prec, rec, f1])
+                y_pred = model.predict(X_test_scaled)
 
-            if acc > best_score:
-                best_score = acc
-                best_model = model
-                best_name = name
-                best_pred = y_pred
+                train_acc = model.score(X_train, y_train)
+                test_acc = accuracy_score(y_test, y_pred)
 
-        # ------------------ SHOW RESULTS ------------------
-        results_df = pd.DataFrame(results, columns=[
-            "Model", "Accuracy", "Precision", "Recall", "F1 Score"
-        ])
+                prec = precision_score(y_test, y_pred, average="weighted")
+                rec = recall_score(y_test, y_pred, average="weighted")
+                f1 = f1_score(y_test, y_pred, average="weighted")
 
-        st.subheader("📊 Model Comparison")
-        st.dataframe(results_df)
+                results.append([name, train_acc, test_acc, prec, rec, f1])
 
-        st.success(f"🏆 Best Model: {best_name}")
+                if test_acc > best_score:
+                    best_score = test_acc
+                    best_model = model
+                    best_pred = y_pred
+                    best_name = name
 
-        # ------------------ OUTPUT ------------------
-        st.subheader("📦 Customer Behavior Output")
+            # ------------------ RESULTS ------------------
+            results_df = pd.DataFrame(results, columns=[
+                "Model", "Train Accuracy", "Test Accuracy", "Precision", "Recall", "F1 Score"
+            ])
 
-        for i in range(len(best_pred)):
+            st.subheader("📊 Model Evaluation")
+            st.dataframe(results_df)
 
-            customer_id = id_test.iloc[i]
-            behavior = labels[best_pred[i]]
+            st.success(f"🏆 Best Model: {best_name}")
 
-            # Reason logic
-            purchase = df.iloc[id_test.index[i]]["Purchase Amount"]
+            # ------------------ OUTPUT ------------------
+            st.subheader("📦 Customer Behavior Output")
 
-            if purchase > df["Purchase Amount"].mean():
-                reason = "Very consistent spending"
-            else:
-                reason = "Irregular spending behavior"
+            for i in range(len(best_pred)):
 
-            st.text(f"""
+                customer_id = id_test.iloc[i]
+                behavior = labels[best_pred[i]]
+
+                # Safe reason logic
+                if "Purchase Amount" in df.columns:
+                    purchase = df.iloc[id_test.index[i]]["Purchase Amount"]
+
+                    if purchase > df["Purchase Amount"].mean():
+                        reason = "Very consistent spending"
+                    else:
+                        reason = "Irregular spending behavior"
+                else:
+                    reason = "Behavior based on model prediction"
+
+                st.text(f"""
 Customer {customer_id}:
 Behavior: {behavior}
 Reason: {reason}
 ----------------------------------------
 """)
+
+        except Exception as e:
+            st.error(f"Error: {e}")
